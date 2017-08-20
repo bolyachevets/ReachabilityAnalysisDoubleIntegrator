@@ -1,8 +1,8 @@
 % scaling is performed only once at the beginning of set evolution.
 % there is also one optimization problem that computes prescaling and
 % consequent controls simultaneously
-% mu tilda here is  the cumulative effect of rescaled control in each
-% generator
+% mu here is  the cumulative effect of rescaled control in each
+% generator. mu_c/mu_x, alpha_c/alpha_x are centers/radii of intervals
 
 % parameters of interest:
 % - timeStep and tFinal
@@ -28,15 +28,12 @@ n = 2;
 IC = interval([-1;-1], [0;0]);
 % dimension of control space
 m = 1;
-
 IC_z = zonotope(IC);
-
 IC_z_generators = get(IC_z, 'Z');
 IC_z_generators = IC_z_generators(:, 2:length(IC_z_generators));
 IC_c = center(IC_z);
 
 % add extra generators
-%  p = n;
 d_extra = 10;
 p = d_extra + n;
 extraScale = 1/d_extra;
@@ -49,8 +46,6 @@ IC_z = zonotope(IC_mat);
 % CONSTRAINTS
 %----------------------------------------------------------------------
 CS = interval([-2;-2], [2;2]);
-%CS = IC;
-%CS_z = zonotope(CS);
 %----------------------------------------------------------------------
 
 % MATRICES
@@ -76,9 +71,7 @@ epsilon = 0.01;
 % separately weight the input dimensions if you care more about some
 % inputs.
 input_weights = ones(m, 1) / m;
-     
-        
-
+          
 cvx_begin quiet
             variable alpha_c(p)
             variable alpha_x(p)
@@ -115,7 +108,7 @@ cvx_begin quiet
                sum(mu_x(:, (p*i+1):p*(i+1)),2) >= -ones(n,1);
            end
           % scaled initial set is inside unscaled one, need this because
-            % of extra generators added 
+          % of extra generators added 
          IC_c + IC_z_generators*alpha_c ...
          + abs(IC_z_generators)*alpha_x  <= supremum(IC);
          IC_c + IC_z_generators*alpha_c ...
@@ -137,11 +130,6 @@ cvx_begin quiet
 
  cvx_end
         
-        alpha_x
-        alpha_c
-        mu_x
-        mu_c
-
 % ACCUMULATE SCALARS - APPLY TO INITIAL SET
 %----------------------------------------------------------------------
 IC_g_mat =[];
@@ -178,16 +166,6 @@ for i=1:number_steps
         Reach_set_gen = horzcat(Reach_set_gen, tempGenerator);
     end
     Reach_center = A_d^i*center(IC_z_g) + sum(computeInputEffect(A_d, B_d, mu_c, p, i),2);
-
     plot(zonotope(horzcat(Reach_center, Reach_set_gen)), [1,2], 'g', 'lineWidth', 2);
-    %pause(1);
+    pause(1);
 end
-
-
-
-% %reachSetOptimization(center(IC_z_g), IC_z_mat(:,2:end), tStart, tFinal, timeStep)
-% % plot the center of the scaled initial set
-% c = center(IC_z_g);
-% x = c(1);
-% y = c(2);
-% plot(x, y, 'x');
