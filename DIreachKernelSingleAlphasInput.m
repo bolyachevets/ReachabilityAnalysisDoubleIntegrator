@@ -1,8 +1,14 @@
-% scaling is performed only once at the beginning of set evolution.
-% there is also one optimization problem that computes prescaling and
-% consequent controls simultaneously
-% mu here is  the cumulative effect of rescaled control in each
-% generator. mu_c/mu_x, alpha_c/alpha_x are centers/radii of intervals
+% Double Integrator Model
+% approximation of finite horizon viability kernel
+% -------------------------------------------------------------------------
+% scaling is performed only once at the beginning of set evolution:
+% within a single optimization problem both prescaling of the initial set 
+% that guarantees constraint satisfaction and consequent controls are 
+% computed simultaneously.
+% mu variables represent hypothetical input dimension of the augmented state space. 
+% Each mu_c (center) and mu_x (radius) belong to the corresponding
+% generator. Similarly, alpha_c and alpha_x represent the center and radius
+% of the rescaling of initial set.
 
 % parameters of interest:
 % - timeStep and tFinal
@@ -13,9 +19,8 @@
 
 % TIME
 %----------------------------------------------------------------------
-% potentially will need to get rid of the similar fields in the options
 tStart=0; %start time
-tFinal=6; %final time
+tFinal=3; %final time
 timeStep=0.1; %time step size for reachable set computation
 % number of linearization points
 number_steps = (tFinal-tStart)/timeStep;
@@ -28,12 +33,15 @@ n = 2;
 IC = interval([-1;-1], [0;0]);
 % dimension of control space
 m = 1;
+
 IC_z = zonotope(IC);
+
 IC_z_generators = get(IC_z, 'Z');
 IC_z_generators = IC_z_generators(:, 2:length(IC_z_generators));
 IC_c = center(IC_z);
 
 % add extra generators
+%  p = n;
 d_extra = 10;
 p = d_extra + n;
 extraScale = 1/d_extra;
@@ -45,7 +53,9 @@ IC_z = zonotope(IC_mat);
 
 % CONSTRAINTS
 %----------------------------------------------------------------------
-CS = interval([-2;-2], [2;2]);
+%CS = interval([-2;-2], [2;2]);
+CS = IC;
+%CS_z = zonotope(CS);
 %----------------------------------------------------------------------
 
 % MATRICES
@@ -71,7 +81,9 @@ epsilon = 0.01;
 % separately weight the input dimensions if you care more about some
 % inputs.
 input_weights = ones(m, 1) / m;
-          
+     
+        
+
 cvx_begin quiet
             variable alpha_c(p)
             variable alpha_x(p)
@@ -82,30 +94,48 @@ cvx_begin quiet
             maximize sum(alpha_x) + sum(input_weights .* sum(mu_x, 2));
 
             subject to
+            % constraints on the magnitude of alpha_c, alpha_x can be
+            % easily derived from the property that scaling factors must
+            % exceed epsilon (if we want scaled generator intervals to be
+            % non-empty)
             for j=1:p
-                alpha_c(j) >=  alpha_x(j) - 1;
-                alpha_c(j) <= 1 - alpha_x(j);
-                % make sure that additional generators don't degenerate
+                % assuming gamma_upper_bar >= gamma_lower_bar + epsilon and that gamma_lowe_bar = alpha_c - alpha_x
+                % we can derive the following constraints on alphas:
                 alpha_x(j) >= epsilon;
-                alpha_x(j) <= 1;
+                % make sure that scaling factors are positive
+                alpha_c(j) - alpha_x(j) >= 0;  
+                
+            %  (can only scale down) seems not necessary with a single optimization problem                
+%                 alpha_x(j) <= 1;
+%                 alpha_c(j) >=  alpha_x(j) - 1;
+%                 alpha_c(j) <= 1 - alpha_x(j);
             end
            
-           % individual control effects on generators are bounded by 1
+           % individual control effects on generators are bounded by 1, 
+           % where -1/+1 do not have the interpretation of a scaling factor, as
+           % in alpha, but rather are min/max values for input
            for j=1:m
              for i=1:p*number_steps
-                mu_c(j,i) >= mu_x(j,i) - 1;
-                mu_c(j,i) <= 1 - mu_x(j,i);
-                % make sure that additional generators don't degenerate
-                mu_x(j,i) >= epsilon;
-                mu_x(j,i) <= 1;
+%                 mu_c(j,i) - mu_x(j,i) >= - 1;
+%                 mu_c(j,i) + mu_x(j,i) <= 1;
+                % control is allowed to be 0
+                mu_x(j,i) >= 0;
+                % maximum radius is half the length of input interval
+                % constraint: (1-(-1))/2
+%                 mu_x(j,i) <= 1;
              end
            end
            % cumulative effect of control cannot exceed 1 in absolute value
+           % (where 1 stands for the most extreme input value allowed, 
+           % which in this case is symmetric around 0)
            for i=0:(number_steps-1)
-               sum(mu_c(:, (p*i+1):p*(i+1)),2) >= sum(mu_x(:, (p*i+1):p*(i+1))) - ones(n,1);
-               sum(mu_c(:, (p*i+1):p*(i+1)),2) <= ones(n,1) - sum(mu_x(:, (p*i+1):p*(i+1)));
-               sum(mu_x(:, (p*i+1):p*(i+1)),2) <= ones(n,1);
-               sum(mu_x(:, (p*i+1):p*(i+1)),2) >= -ones(n,1);
+               sum(mu_c(:, (p*i+1):p*(i+1)),2) - sum(mu_x(:, (p*i+1):p*(i+1)),2) >=  -1;
+               sum(mu_c(:, (p*i+1):p*(i+1)),2) + sum(mu_x(:, (p*i+1):p*(i+1)),2) <= 1;
+               % cumulative radius for a given control dimension is between
+               % zero and half the distance between min and max input
+               % values
+%                sum(mu_x(:, (p*i+1):p*(i+1)),2) <= 1;
+%                sum(mu_x(:, (p*i+1):p*(i+1)),2) >= 0;             
            end
           % scaled initial set is inside unscaled one, need this because
           % of extra generators added 
@@ -129,7 +159,10 @@ cvx_begin quiet
          end
 
  cvx_end
-        
+     
+ alpha_c
+ alpha_x
+
 % ACCUMULATE SCALARS - APPLY TO INITIAL SET
 %----------------------------------------------------------------------
 IC_g_mat =[];
@@ -151,7 +184,7 @@ hold on;
 plot(IC, [1,2], 'y','lineWidth',2);
 plot(CS, [1,2], 'g','lineWidth',2);
 plot(IC_z_g, [1,2],'y','lineWidth',2);
-pause(1);
+%pause(1);
  
 
 % evolve the safe set forward to illustrate the outcome (proof of concept)
@@ -166,6 +199,7 @@ for i=1:number_steps
         Reach_set_gen = horzcat(Reach_set_gen, tempGenerator);
     end
     Reach_center = A_d^i*center(IC_z_g) + sum(computeInputEffect(A_d, B_d, mu_c, p, i),2);
+
     plot(zonotope(horzcat(Reach_center, Reach_set_gen)), [1,2], 'g', 'lineWidth', 2);
-    pause(1);
+    %pause(1);
 end
